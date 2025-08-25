@@ -4,7 +4,7 @@
 import hashlib
 import ubinascii as binascii
 import struct
-import ure as re
+import ujson as json
 
 def handle_websocket_connection(conn):
     """
@@ -24,7 +24,6 @@ def handle_websocket_connection(conn):
             client_key = request[key_start:key_end].strip()
 
             # Genera la clave de respuesta usando SHA1 y Base64.
-            # Esta es una parte crítica del protocolo WebSocket.
             guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             handshake_input = (client_key + guid).encode('utf-8')
             sha1_hash = hashlib.sha1(handshake_input)
@@ -48,15 +47,20 @@ def handle_websocket_connection(conn):
                     # Si la función devuelve None, significa que la conexión se cerró.
                     break
                 
-                # Procesa el mensaje recibido (en este caso, solo lo imprime).
-                handle_message(message)
-
+                # Procesa el mensaje recibido
+                handle_message(conn, message)
+                
         else:
             conn.close()
             print("Conexión no es un WebSocket. Cerrada.")
 
     except Exception as e:
         print("Error en la conexión WebSocket:", e)
+    finally:
+        # Aquí cerramos la conexión solo cuando el bucle 'while True' de la
+        # conexión ha finalizado o ha ocurrido un error.
+        conn.close()
+        print('Conexión TCP cerrada.')
 
 def read_websocket_message(conn):
     """
@@ -96,14 +100,80 @@ def read_websocket_message(conn):
         # Retorna el mensaje decodificado.
         if opcode == 0x1: # Si es un mensaje de texto
             return data.decode('utf-8')
+        elif opcode == 0x8: # Si el cliente envió un 'close frame'
+            return None
         
     except Exception as e:
         print("Error al leer el mensaje:", e)
         return None
 
-def handle_message(message):
+def handle_message(conn, message):
     """
     Procesa un mensaje recibido del cliente.
     Aquí puedes añadir tu lógica (ej. controlar un LED, enviar un dato a un sensor).
     """
-    print("Mensaje recibido:", message)
+    try:
+        print("Mensaje recibido:", message)
+        
+        # Intenta parsear como JSON para manejar ping-pong
+        try:
+            data = json.loads(message)
+            
+            if data.get('type') == 'ping':
+                print("📡 Ping recibido, enviando pong...")
+                # Responde con pong
+                pong_response = json.dumps({'type': 'pong'})
+                send_websocket_message(conn, pong_response)
+                
+            elif data.get('type') == 'message':
+                print("💌 Mensaje de usuario:", data.get('content', ''))
+                # Aquí puedes agregar tu lógica para manejar mensajes del usuario
+                
+                # Ejemplo: responder al cliente
+                response = json.dumps({
+                    'type': 'response', 
+                    'content': 'Mensaje recibido: ' + str(data.get('content', ''))
+                })
+                send_websocket_message(conn, response)
+                
+            else:
+                print("Tipo de mensaje desconocido:", data.get('type'))
+                
+        except:
+            # Si no es JSON válido, trata como mensaje normal
+            print("Mensaje de texto simple:", message)
+            
+            # Respuesta de eco
+            response = "ESP32 recibió: " + message
+            send_websocket_message(conn, response)
+            
+    except Exception as e:
+        print("Error al manejar mensaje:", e)
+
+def send_websocket_message(conn, message):
+    """
+    Envía un mensaje a través del WebSocket usando el formato de frame correcto.
+    """
+    try:
+        # Convierte el mensaje a bytes
+        message_bytes = message.encode('utf-8')
+        message_length = len(message_bytes)
+        
+        # Construye el header del frame
+        # Byte 1: FIN=1, RSV=000, Opcode=0001 (text frame)
+        byte1 = 0x81
+        
+        # Byte 2 y longitud
+        if message_length <= 125:
+            header = struct.pack('!BB', byte1, message_length)
+        elif message_length <= 65535:
+            header = struct.pack('!BBH', byte1, 126, message_length)
+        else:
+            header = struct.pack('!BBQ', byte1, 127, message_length)
+        
+        # Envía header + mensaje
+        conn.send(header + message_bytes)
+        print("📤 Mensaje enviado:", message)
+        
+    except Exception as e:
+        print("Error al enviar mensaje:", e)

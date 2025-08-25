@@ -48,19 +48,13 @@ print('Servidor WebSocket escuchando en el puerto', port)
 while True:
     try:
         # Acepta una nueva conexión entrante de un cliente.
-        # 'conn' es el nuevo socket para comunicarse con el cliente, y 'addr' es su dirección.
         conn, addr = s.accept()
         print('Conexión TCP aceptada desde', addr)
         
-        # Llama a una función en el nuevo módulo para manejar el protocolo WebSocket.
-        # Esta función se encargará de todo el proceso de 'handshake' y de los mensajes.
+        # Llama a la función para manejar el protocolo WebSocket.
         websocket.handle_websocket_connection(conn)
 
     except Exception as e:
         # Manejo de errores en caso de que algo falle en el socket principal.
         print('Error del servidor:', e)
         sleep(1)
-    finally:
-        # Asegura que la conexión (conn) se cierre siempre.
-        conn.close()
-        print('Conexión TCP cerrada.')
